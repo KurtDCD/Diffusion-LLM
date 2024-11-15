@@ -215,7 +215,7 @@ def predefined_loss_fn1(x, obs_dim, action_dim, normalizer,
 def predefined_loss_fn2(x, obs_dim, action_dim, normalizer, 
                                   wall_pos=[0.1, 0.6, 0.075], 
                                   wall_half_size=[0.1, 0.01, 0.13], 
-                                  min_safe_dist=0.05, 
+                                  min_safe_dist=0.07, 
                                   delta_t=1.0, 
                                   return_penetration=False):
     """
@@ -280,7 +280,7 @@ def predefined_loss_fn2(x, obs_dim, action_dim, normalizer,
 
     # Calculate penalties where the hand is too close to the wall
     penalties = torch.relu(-safe_distances) ** 2  # [batch_size, horizon, 3]
-    scaled_p=penalties*10
+    scaled_p=penalties
 
     # Sum penalties across dimensions to get total penalty per timestep
     total_penetration = scaled_p.sum(dim=-1)  # [batch_size, horizon]
