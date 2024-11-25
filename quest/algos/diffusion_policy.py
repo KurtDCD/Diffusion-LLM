@@ -52,8 +52,8 @@ class DiffusionModel(nn.Module):
                  skill_block_size,
                  diffusion_inf_steps,
                  device,
-                 n_guide_steps=2,
-                 guidance_scale=0.1,
+                 n_guide_steps=4,
+                 guidance_scale=0.25,
                  guide_fn=None,
                  verbose=False,
                  ):
@@ -112,7 +112,7 @@ class DiffusionModel(nn.Module):
             original_noise_pred = noise_pred
 
             # Apply guidance if provided
-            if self.guide_fn is not None and k >= self.noise_scheduler.timesteps[-2]:
+            if self.guide_fn is not None and k >= self.noise_scheduler.timesteps[-7]:
                 # Get current alpha values from scheduler
                 alpha_t_bar = self.noise_scheduler.alphas_cumprod[k]
                 
@@ -131,7 +131,7 @@ class DiffusionModel(nn.Module):
                     # Scale gradient based on loss magnitude
                     loss_value = loss.item()
                     scale_factor = 1.0
-                    if loss_value != 0:
+                    """ if loss_value != 0:
                         power = 0
                         while abs(loss_value) > 1.0:
                             loss_value /= 10
@@ -139,14 +139,15 @@ class DiffusionModel(nn.Module):
                         while abs(loss_value) < 0.1:
                             loss_value *= 10
                             power += 1
-                        scale_factor = 10 ** power
-                    
-                    grad = grad * scale_factor
+                        scale_factor = 10 ** power """
+                    #lamb=torch.sigmoid( 0.5* (k - 30))
+                    grad = grad * scale_factor#*lamb
                     
                     # Convert x0 gradient to noise gradient
                     # Since x0 = (xt - sqrt(1-αt_bar) * εt) / sqrt(αt_bar)
                     # ∂ε/∂x0 = -sqrt(αt_bar)/sqrt(1-αt_bar)
-                    noise_grad = -grad * torch.sqrt(alpha_t_bar) / torch.sqrt(1 - alpha_t_bar)
+                    #noise_grad = -grad * torch.sqrt(alpha_t_bar) / torch.sqrt(1 - alpha_t_bar)
+                    noise_grad = -grad * torch.sqrt(1 - alpha_t_bar) / torch.sqrt(alpha_t_bar)
                     
                     # Apply gradient to predicted noise
                     noise_pred = noise_pred - self.guidance_scale * noise_grad
@@ -156,7 +157,9 @@ class DiffusionModel(nn.Module):
                         print("="*30)
                         print(f"Timestep: {k}")
                         print(f"Loss: {loss.item():.5f}")
-                        print(f"Scale factor: {scale_factor}")
+                        print(f"N_guided_steps: {self.n_guide_steps}")
+                        print(f"Guidance scale: {self.guidance_scale}")
+                        #print(f"Scale factor: {lamb}")
                         print(f"Original noise pred: {original_noise_pred[0,:2,:2]}")
                         print(f"Noise gradient: {noise_grad[0,:2,:2]}")
                         print(f"Modified noise pred: {noise_pred[0,:2,:2]}")
@@ -171,7 +174,7 @@ class DiffusionModel(nn.Module):
     def ema_update(self):
         self.ema.step(self.net.parameters())
 
-def wall_loss_fn(env_id, action, robot_states, safe_dist=0.07, delta_t=1.0):
+def wall_loss_fn(env_id, action, robot_states, safe_dist=0.1, delta_t=1.0):
     """
     differentiable wall loss function
     action: (B, T, A)
@@ -182,7 +185,7 @@ def wall_loss_fn(env_id, action, robot_states, safe_dist=0.07, delta_t=1.0):
     env_name = mu._env_names[env_id]
     wall_pos, wall_size = get_wall_position_and_size(env_name)
     wall_pos = torch.tensor(wall_pos, device=action.device, dtype=action.dtype).view(1, 1, -1)
-    wall_size = torch.tensor(wall_size, device=action.device, dtype=action.dtype)/2
+    wall_size = torch.tensor(wall_size, device=action.device, dtype=action.dtype)
     wall_size = wall_size.view(1, 1, -1)
     eef_pos = [robot_states[:, -1, :3]]
     # compute trajectory of the eef
@@ -192,9 +195,49 @@ def wall_loss_fn(env_id, action, robot_states, safe_dist=0.07, delta_t=1.0):
 
     # compute distance to the wall
     distances = torch.abs(eef_pos - wall_pos) - wall_size - safe_dist
-    loss = torch.relu(-distances)**2
+    print(f"SafeD: {safe_dist} \nDISTANCES: {distances} ")
+    sharp = torch.relu(-distances)**2
+    gradual = torch.exp(-distances)
+    # Dynamic weighting: prioritize sharp penalties near the wall
+    weight_sharp = torch.sigmoid(-distances.mean(dim=-1))  # More sharp weight closer to the wall
+    weight_gradual = 1 - weight_sharp
+    weight_sharp = weight_sharp.unsqueeze(-1)  # Shape (B, T, 1)
+    weight_gradual = weight_gradual.unsqueeze(-1)  # Shape (B, T, 1)
+
+    loss = gradual*weight_gradual*10 + sharp*weight_sharp*2
     loss = loss.sum(dim=-1).mean(dim=1)
     return loss
+
+def improved_wall_loss_fn(env_id, action, robot_states, safe_dist=0.05, delta_t=1.0):
+    """
+    Improved loss function with directional and trajectory-wide penalties.
+    """
+    env_name = mu._env_names[env_id]
+    wall_pos, wall_size = get_wall_position_and_size(env_name)
+    wall_pos = torch.tensor(wall_pos, device=action.device, dtype=action.dtype).view(1, 1, -1)
+    wall_size = torch.tensor(wall_size, device=action.device, dtype=action.dtype)
+    wall_size = wall_size.view(1, 1, -1)
+    
+    eef_pos = [robot_states[:, -1, :3]]
+    for i in range(action.shape[1]):
+        eef_pos.append(eef_pos[-1] + action[:, i, :3] * delta_t)
+    eef_pos = torch.stack(eef_pos, dim=1)[:, 1:]
+    
+    # Distance to the wall
+    distances = torch.abs(eef_pos - wall_pos) - wall_size - safe_dist
+    distances_x = distances[:, :, 0]
+    distances_y = distances[:, :, 1]
+    
+    # Penalties
+    sharp_loss = torch.relu(-distances)**2
+    gradual_loss = torch.exp(-distances)
+    directional_loss = torch.relu(-action[:, :, :2]).sum(dim=-1)  # Penalize moving toward the wall
+
+    # Combined loss
+    total_loss = (10 * gradual_loss + 5 * sharp_loss).sum(dim=-1).mean(dim=1)
+    trajectory_loss = total_loss + 2 * directional_loss.mean(dim=1)
+    return trajectory_loss
+
 
 
 def get_wall_position_and_size(env_name):

@@ -248,6 +248,7 @@ classes = {
             'pick-place-wall-v2',
             'push-wall-v2',
             'reach-wall-v2',
+            #'pick-place-v2'
         ]
     },
 }

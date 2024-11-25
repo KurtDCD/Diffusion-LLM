@@ -21,7 +21,8 @@ python evaluate.py \
     stage=1 \
     training.use_tqdm=true \
     make_unique_experiment_dir=true \
-    checkpoint_path=/satassdscratch/amete7/quest-dev/experiments/metaworld/ML45_GUIDED/diffusion_policy/pretrain/block_16/0/stage_1/multitask_model_epoch_0050.pth \
+    checkpoint_path=/home/kurt/Diffusion-LLM/experiments/metaworld/ML45_GUIDED/diffusion_policy/pretrain/block_16/0/stage_1/multitask_model_epoch_0050.pth \
+    update_cfg=true \
     device=cuda:${device} \
     rollout.rollouts_per_env=20 \
     rollout.n_video=10 \

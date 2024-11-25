@@ -37,11 +37,12 @@ def main(cfg):
         checkpoint_path = utils.get_latest_checkpoint(cfg.checkpoint_path)
     state_dict = utils.load_state(checkpoint_path)
     
-    if 'config' in state_dict:
+    if 'config' in state_dict and not cfg.update_cfg:
         print('autoloading based on saved parameters')
         model = instantiate(state_dict['config']['algo']['policy'], 
                             shape_meta=cfg.task.shape_meta)
     else:
+        print("loading from yml")
         model = instantiate(cfg.algo.policy,
                             shape_meta=cfg.task.shape_meta)
     model.to(device)
