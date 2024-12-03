@@ -243,11 +243,12 @@ classes = {
             'window-close-v2',
             'window-open-v2'],
         'test': [
-            'button-press-wall-v2',
-            'button-press-topdown-wall-v2',
+            #'button-press-wall-v2',
+            #'door-open-v2',
+            #'button-press-topdown-wall-v2',
             'pick-place-wall-v2',
-            'push-wall-v2',
-            'reach-wall-v2',
+            #'push-wall-v2',
+            #'reach-wall-v2',
             #'pick-place-v2'
         ]
     },

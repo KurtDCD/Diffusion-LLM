@@ -2,6 +2,7 @@ import numpy as np
 
 import quest.utils.metaworld_utils as mu
 import wandb
+import torch
 from tqdm import tqdm
 
 
@@ -24,11 +25,11 @@ class MetaWorldRunner():
         self.random_task = random_task
         
 
-    def run(self, policy, n_video=0, do_tqdm=False, save_video_fn=None):
+    """ def run(self, policy, n_video=0, do_tqdm=False, save_video_fn=None):
         # print
         env_names = mu.get_env_names(self.benchmark_name, self.mode)
         successes, per_env_any_success, rewards = [], [], []
-        per_env_success_rates, per_env_rewards = {}, {}
+        per_env_success_rates, per_env_rewards, per_env_pos, per_env_speed = {}, {}, {}, {}
         videos = {}
         for env_name in tqdm(env_names, disable=not do_tqdm):
 
@@ -41,7 +42,7 @@ class MetaWorldRunner():
                 env_succs.append(success)
                 env_rews.append(total_reward)
                 rewards.append(total_reward)
-
+                print(episode)
                 if i < n_video:
                     if save_video_fn is not None:
                         video_hwc = np.array(episode['render'])
@@ -53,6 +54,8 @@ class MetaWorldRunner():
             per_env_success_rates[env_name] = np.mean(env_succs)
             per_env_rewards[env_name] = np.mean(env_rews)
             per_env_any_success.append(any_success)
+            per_env_pos[env_name]=episode["robot_states"][:, :, :3]
+            per_env_speed[env_name]= episode["speed"]
 
             if len(env_video) > 0:
                 video_hwc = np.array(env_video)
@@ -77,8 +80,76 @@ class MetaWorldRunner():
 
             output['rollout_videos'][env_name] = videos[env_name]
         
+        return output """
+    def run(self, policy, n_video=0, do_tqdm=False, save_video_fn=None):
+        env_names = mu.get_env_names(self.benchmark_name, self.mode)
+        successes, per_env_any_success, rewards = [], [], []
+        per_env_success_rates, per_env_rewards = {}, {}
+        per_env_pos, per_env_speed, per_env_success = {}, {}, {}
+        videos = {}
+        
+        for env_name in tqdm(env_names, disable=not do_tqdm):
+            any_success = False
+            env_succs, env_rews, env_video = [], [], []
+            rollouts = self.run_policy_in_env(env_name, policy, render=n_video > 0)
+            
+            # Initialize storage lists for each environment
+            per_env_pos[env_name] = []
+            per_env_speed[env_name] = []
+            per_env_success[env_name] = []
+            
+            for i, (success, total_reward, episode) in enumerate(rollouts):
+                any_success = any_success or success
+                successes.append(success)
+                env_succs.append(success)
+                env_rews.append(total_reward)
+                rewards.append(total_reward)
+                
+                if i < n_video:
+                    if save_video_fn is not None:
+                        video_hwc = np.array(episode['render'])
+                        video_chw = video_hwc.transpose((0, 3, 1, 2))
+                        save_video_fn(video_chw, env_name, i)
+                    else:
+                        env_video.extend(episode['render'])
+                
+                # Append per-episode position and speed data
+                per_env_pos[env_name].append(episode["robot_states"][:, :3])  # Shape: (T, 3)
+                per_env_speed[env_name].append(episode["speed"])              # Shape: (T,)
+                per_env_success[env_name].append(success)
+            
+            # Compute per-environment success rates and rewards
+            per_env_success_rates[env_name] = np.mean(env_succs)
+            per_env_rewards[env_name] = np.mean(env_rews)
+            per_env_any_success.append(any_success)
+            
+            if len(env_video) > 0:
+                video_hwc = np.array(env_video)
+                video_chw = video_hwc.transpose((0, 3, 1, 2))
+                videos[env_name] = wandb.Video(video_chw, fps=self.fps)
+        
+        # Prepare output dictionary
+        output = {
+            'rollout': {
+                'overall_success_rate': np.mean(successes),
+                'overall_average_reward': np.mean(rewards),
+                'environments_solved': int(np.sum(per_env_any_success)),
+            },
+            'rollout_success_rate': {},
+            'per_env_positions': {env_name: [pos.tolist() for pos in per_env_pos[env_name]] for env_name in per_env_pos},
+            'per_env_speeds': {env_name: [speed.tolist() for speed in per_env_speed[env_name]] for env_name in per_env_speed},
+            'per_env_success': {env_name: [success for success in per_env_success[env_name]] for env_name in per_env_success},
+        }
+        
+        for env_name in env_names:
+            output['rollout_success_rate'][env_name] = per_env_success_rates[env_name]
+        
+        if len(videos) > 0:
+            output['rollout_videos'] = {}
+            for env_name in videos:
+                output['rollout_videos'][env_name] = videos[env_name]
+        
         return output
-
 
     def run_policy_in_env(self, env_name, policy, render=False):
         env = self.env_factory(env_name=env_name)
@@ -119,6 +190,7 @@ class MetaWorldRunner():
 
         episode = {key: [value[-1]] for key, value in obs.items()}
         episode['actions'] = []
+        episode['speed'] = []
         episode['terminated'] = []
         episode['truncated'] = []
         episode['reward'] = []
@@ -142,9 +214,13 @@ class MetaWorldRunner():
             total_reward += reward
             obs = next_obs
 
+
             for key, value in obs.items():
                 episode[key].append(value[-1])
             episode['actions'].append(action)
+            action = torch.tensor(action) if isinstance(action, np.ndarray) else action
+            speed = torch.linalg.norm(action).item()
+            episode['speed'].append(speed)
             episode['terminated'].append(terminated)
             episode['truncated'].append(truncated)
             episode['reward'].append(reward)

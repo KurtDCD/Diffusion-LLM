@@ -29,4 +29,5 @@ data_prefix: ./data
 make_unique_experiment_dir: false
 
 checkpoint_path: null
+update_cfg: false
 

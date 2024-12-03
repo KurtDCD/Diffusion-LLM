@@ -27,6 +27,7 @@ def main(cfg):
     # create model
     save_dir, _ = utils.get_experiment_dir(cfg, evaluate=True)
     os.makedirs(save_dir)
+    cfg.algo.policy.diffusion_model.save_dir=save_dir
 
     if cfg.checkpoint_path is None:
         # Basically if you don't provide a checkpoint path it will automatically find one corresponding
@@ -45,6 +46,8 @@ def main(cfg):
         print("loading from yml")
         model = instantiate(cfg.algo.policy,
                             shape_meta=cfg.task.shape_meta)
+        
+    #model.save_dir=save_dir
     model.to(device)
     model.eval()
 

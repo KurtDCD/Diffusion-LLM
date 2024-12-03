@@ -21,11 +21,36 @@ policy:
     n_guide_steps: ${algo.n_guide_steps}
     guidance_scale: ${algo.guidance_scale}
     guide_fn:
+      #Please create a Python loss function that ensures the end-effector avoids a wall
+      #located at position [0.1, 0.6, 0.075] with dimensions [0.1, 0.01, 0.12]. 
+      #The function should penalize movements that come closer than 0.05 units 
+      #and encourage trajectories to stay within safe distances. 
+
+      #The function should be differentiable with respect to `x0_pred`, which contains actions with shape `(B, T, A)`, 
+      #where `T=16` is the number of sequantial steps in the trajectory and `A=4` contains deltas in x, y, z, and the end-effector. 
+      #`robot_states` is of shape `(B, 1, 8)` where the first 3 elements are the current position in x, y, z.
+
+      #The output must be only Python code for the function, no imports but you have access to pytorch, formatted like this:
+
+      #```python
+      #def guide_fn(task_id, x0_pred, robot_states):
+        #Example getting trajectory using actions from x0_pred
+      #  wall_pos = torch.tensor(wall_pos, device=x0_pred.device, dtype=x0_pred.dtype).view(1, 1, -1)
+      #  wall_size = torch.tensor(wall_size, device=x0_pred.device, dtype=x0_pred.dtype)
+      #  wall_size = wall_size.view(1, 1, -1)
+      #  eef_pos = [robot_states[:, -1, :3]] #Adjusting robot_states dimensions for difference with x0_pred
+      #  # compute trajectory of the eef
+      #  for i in range(x0_pred.shape[1]):
+      #      eef_pos.append(eef_pos[-1] + x0_pred[:, i, :3])
+      #  eef_pos = torch.stack(eef_pos, dim=1)[:, 1:]
+      #  # Implementation here
+      #```
       _target_: quest.algos.diffusion_policy.wall_loss_fn
       _partial_: true
-      safe_dist: 0.02
-      delta_t: 1.0
+      #safe_dist: 0.05
+      #delta_t: 1.0
     verbose: true
+    save_dir: null
   action_horizon: ${algo.action_horizon}
   obs_reduction: cat
   device: ${device}
@@ -49,7 +74,7 @@ skill_block_size: 16 # this is input sequence length to encoder
 diffusion_train_steps: 100
 diffusion_inf_steps: 10
 n_guide_steps: 2 # set to 0 if you don't want to use guided diffusion
-guidance_scale: 0.75
+guidance_scale: 0.1
 
 action_horizon: 2 # mpc horizon for execution
 
